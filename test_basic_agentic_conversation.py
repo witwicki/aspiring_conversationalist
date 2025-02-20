@@ -65,14 +65,16 @@ ivi_port = 4200
 def send_ivi_command(event_name, **kwargs):
     command = [
         f'{Path(__file__).resolve(strict=True).parent}/../VAMPCar/scripts/ivi_interaction/sender2.py',
-        f'--port {ivi_port}',
-        f'--ip "{ivi_ip}"',
-        f'--EventName "{event_name}"'
+        f'--port={ivi_port}',
+        f'--ip={ivi_ip}',
+        f'--EventName={event_name}'
     ]
     for key, value in kwargs.items():
-        command.append(f'--{key} {value}')
+        command.append(f'--{key}={value}')
     print(f'~~> {" ".join(command)}')
-    result = subprocess.call(command, shell=True)
+    result = subprocess.run(command)
+    if result.returncode:
+        print("This tool returned an error.")
     #result = subprocess.call(command)
     #print(f"command returned {result}")
 
@@ -92,26 +94,26 @@ class HVACTool(lr.ToolMessage):
         # Each example can either be...
         return [
             # ... just instances of the tool-class, OR
-            cls(speed="low"),
-            cls(speed="high"),
+            cls(speed="Low"),
+            cls(speed="High"),
             (  # ...a tuple of "thought leading to tool", and the tool instance
                 "I want to cool the cabin",
-                cls(speed="high"),
+                cls(speed="High"),
             ),
             (
                 "I want to stop cooling the cabin",
-                cls(speed="low"),
+                cls(speed="Low"),
             ),
         ]
     
     def handle(self): # -> AgentDoneTool:
         print(f"~> Calling set_fan_speed({self.speed})")
-        send_ivi_command("HVACCommand", HVACValue=f'"{self.speed}"')
+        send_ivi_command("HVACCommand", HVACValue=self.speed)
         return f"Set fan speed to {self.speed}."
         
 class AudioTool(lr.ToolMessage):
     request: str = "adjust_audio_volume"
-    purpose: str = "To change the volume of the music within the range of 0 (silent) to 10 (maximum volume)"
+    purpose: str = "To change the volume of the music within the range of 0 (silent) to 40 (maximum volume)"
     volume: int
 
     @classmethod
@@ -120,24 +122,24 @@ class AudioTool(lr.ToolMessage):
         # Each example can either be...
         return [
             # ... just instances of the tool-class, OR
-            cls(volume="4"),
+            cls(volume="10"),
             (  # ...a tuple of "thought leading to tool", and the tool instance
                 "I want to crank up the volume",
-                cls(volume="7"),
+                cls(volume="35"),
             ),
             (
                 "I want to restore the volume to a normal level",
-                cls(volume="4"),
+                cls(volume="10"),
             ),
             (
                 "I want to lower the volume",
-                cls(volume="2")
+                cls(volume="5")
             )
         ]
 
     def handle(self): # -> AgentDoneTool:
         print(f"~> Calling adjust_audio_volume({self.volume})")
-        send_ivi_command("AudioCommand", Volume=f'"{self.volume}"')
+        send_ivi_command("AudioCommand", Volume=self.volume)
         return f"Set volume level to {self.volume}."
 
 class RadioTool(lr.ToolMessage):
@@ -170,7 +172,7 @@ class RadioTool(lr.ToolMessage):
     
     def handle(self): # -> AgentDoneTool:
         print(f"~> Calling search_for_radio_station({self.search_term})")
-        send_ivi_command("RadioCommand", Query=f'"{self.search_term}"')
+        send_ivi_command("RadioCommand", Query=self.search_term)
         return f"Searched for radio station related to {self.search_term} and found it."
 
 ####### AGENT + CONVERSATIONAL TASK #######
@@ -209,7 +211,7 @@ class CarCompanionAgent(lr.ChatAgent):
         Returns:
             (str) User response, packaged as a ChatDocument
         """
-        if not self.voice_input:
+        if not self.voice_input:    
             return super().user_response(msg)
 
         else:
