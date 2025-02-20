@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 import subprocess
 import socket
+import click
 from typing import Any, List, Tuple, Type, Optional
 import langroid as lr
 from langroid.agent.tools.orchestration import ForwardTool #, AgentDoneTool
@@ -40,8 +41,11 @@ def speak_llm_response(response: str):
 # ASR listener
 host = 'localhost'
 port = 27400
-asr_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) 
-asr_socket.connect((host, port))
+asr_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+try:
+    asr_socket.connect((host, port))
+except:
+    print(f"Could not connect to ASR server on {host}:{port}")
 
 def listen_for_user_speech():
     user_text = ""
@@ -72,11 +76,6 @@ def send_ivi_command(event_name, **kwargs):
     #result = subprocess.call(command)
     #print(f"command returned {result}")
 
-# LLM from ollama
-llm_config = lr.language_models.OpenAIGPTConfig(
-    chat_model="ollama/llama3.2", #"ollama/cow/tulu3_tools",
-    chat_context_length=16_000, # adjust based on model
-)
 
 ####### TOOLS #######
 
@@ -181,6 +180,12 @@ class CarCompanionAgent(lr.ChatAgent):
     USER_GOODBYE_PHRASE = "goodbye"
     
     def __init__(self, *args, **kwargs) -> None:
+        # pull out added keywords (not part of ChatAgent class)
+        self.voice_input = kwargs['voice_input']
+        del kwargs['voice_input']
+        self.speech_output = kwargs['speech_output']
+        del kwargs['speech_output']
+        # call ChatAgent constructor
         super().__init__(*args, **kwargs)
         self.user_said_goodbye: bool = False
     
@@ -204,19 +209,22 @@ class CarCompanionAgent(lr.ChatAgent):
         Returns:
             (str) User response, packaged as a ChatDocument
         """
+        if not self.voice_input:
+            return super().user_response(msg)
 
-        if not self.user_can_respond(msg):
-            return None
-
-        if self.default_human_response is not None:
-            user_msg = self.default_human_response
         else:
-            print("\nCustomer: ", end="")
-            user_msg = listen_for_user_speech()
-            if user_msg.lower().replace(" ","") == self.USER_GOODBYE_PHRASE:
-                self.user_said_goodbye = True
+            if not self.user_can_respond(msg):
+                return None
 
-        return self._user_response_final(msg, user_msg)
+            if self.default_human_response is not None:
+                user_msg = self.default_human_response
+            else:
+                print("\nCustomer: ", end="")
+                user_msg = listen_for_user_speech()
+                if user_msg.lower().replace(" ","") == self.USER_GOODBYE_PHRASE:
+                    self.user_said_goodbye = True
+
+            return self._user_response_final(msg, user_msg)
 
 
     def _render_llm_response(
@@ -227,35 +235,66 @@ class CarCompanionAgent(lr.ChatAgent):
         adding a TTS output for any non-tool-call response portion 
         """
         super()._render_llm_response(response, citation_only)
-        response_as_string = str(response)
-        if not response_as_string.startswith("TOOL") and not response_as_string.startswith("{"):
-            speak_llm_response(response_as_string)
-
-# langroid agent
-agent_config = lr.ChatAgentConfig(
-    name="Neptune",
-    llm=llm_config,
-    system_message="""
-        You are a driving companion.  Using your tools, you have the capability to (a) find and set radio stations, 
-        (b) adjust the volume, and (c) adjust the fan speed of the climate control.
-        Keep your responses brief and use casual speech.
-        It's OK to respond with '[Silence]' if you don't have anything substantial to add to the conversation.
-        Do not, under any circumstnances, include an enumerated list in your response.
-        By the way, your name is Neptune.
-    """,
-    use_tools=True, 
-)
-agent = CarCompanionAgent(agent_config)
-agent.enable_message(HVACTool)
-agent.enable_message(AudioTool)
-agent.enable_message(RadioTool)
-
-# interacton task
-task = lr.Task(agent, interactive=False, llm_delegate=True)
-
-##### MAIN LOOP #####
-
-while not agent.user_said_goodbye:
-    task.step() 
+        if self.speech_output:
+            response_as_string = str(response)
+            if not response_as_string.startswith("TOOL") and not response_as_string.startswith("{"):
+                speak_llm_response(response_as_string)
 
 
+####### MAIN #######
+
+@click.command()
+@click.option('--llm', default="llama3.2", show_default=True, help='model to use from hosted ollama server')
+@click.option('--langroid_tools', default=False, is_flag=True, show_default=True, help="optionally, use langroid's tool framework instead of the native functions API")
+@click.option('--llm_delegate', default=False, is_flag=True, help="...")
+@click.option('--hvac/--no-hvac', default=True, show_default=True, help='whether or not to give the LLM access to the HVAC control')
+@click.option('--volume/--no-volume', default=True, show_default=True, help='whether or not to give the LLM access to the IVI audio settings tools')
+@click.option('--radio/--no-radio', default=False, show_default=True, help='whether or not to give the LLM access to the internet radio tool')
+@click.option('--tts/--no-tts', default=True, show_default=True, help='whether or not to invoke tts to speak output')
+@click.option('--input_by_voice/--input_by_text', default=True, show_default=True, help='input by speaking (requires an ASR server to be running) instead of typing')
+
+def main(llm, langroid_tools, llm_delegate, hvac, volume, radio, tts, input_by_voice):
+    # LLM from ollama
+    llm_config = lr.language_models.OpenAIGPTConfig(
+    chat_model=f"ollama/{llm}", #"ollama/cow/tulu3_tools",
+    chat_context_length=16_000, # adjust based on model
+    )
+
+    # langroid agent
+    agent_config = lr.ChatAgentConfig(
+        name="Neptune",
+        llm=llm_config,
+        system_message=f"""
+            You are a driving companion.  Using your tools, you have the capability to:
+            {'- find and set radio stations' if radio else ''} 
+            {'- adjust the volume' if volume else ''}
+            {'- adjust the fan speed of the climate control' if hvac else ''}
+            .
+            Keep your responses brief and use casual speech.
+            It's OK to respond with '[Silence]' if you don't have anything substantial to add to the conversation.
+            Do not, under any circumstnances, include an enumerated list in your response.
+            By the way, your name is Neptune.
+        """,
+        use_tools=langroid_tools,
+        use_functions_api=(not langroid_tools),
+    )
+    agent = CarCompanionAgent(agent_config, voice_input=input_by_voice, speech_output=tts)
+    if hvac:
+        agent.enable_message(HVACTool)
+        print("HVAC tool use enabled")
+    if volume:
+        agent.enable_message(AudioTool)
+        print("Audio tool use enabled")
+    if radio:
+        agent.enable_message(RadioTool)
+        print("Radio tool use enabled")
+
+    # interacton task
+    task = lr.Task(agent, interactive=True, llm_delegate=llm_delegate)
+
+    # main loop
+    while not agent.user_said_goodbye:
+        task.step() 
+
+if __name__ == "__main__":
+    main()
