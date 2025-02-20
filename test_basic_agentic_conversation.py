@@ -16,7 +16,8 @@ IGNORED_RESPONSE_SUFFIXES = [
     r'\s*\[Silence\]$',
     r'\s*<\[Silence\]>$',
     r'\s*<\|system.*$',
-    r'\s*<\|user\|>.*$'
+    r'\s*<\|user\|>.*$',
+    r'\s*\[TOOL.*$',
     r'\s*<$',
     r'\s*$',
 ]
