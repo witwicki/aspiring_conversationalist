@@ -254,29 +254,35 @@ class CarCompanionAgent(lr.ChatAgent):
 @click.option('--radio/--no-radio', default=False, show_default=True, help='whether or not to give the LLM access to the internet radio tool')
 @click.option('--tts/--no-tts', default=True, show_default=True, help='whether or not to invoke tts to speak output')
 @click.option('--input_by_voice/--input_by_text', default=True, show_default=True, help='input by speaking (requires an ASR server to be running) instead of typing')
-
-def main(llm, langroid_tools, llm_delegate, hvac, volume, radio, tts, input_by_voice):
+@click.option('--prompt', type=str, help='filename from which to load custom prompt text')
+def main(llm, langroid_tools, llm_delegate, hvac, volume, radio, tts, input_by_voice, prompt):
     # LLM from ollama
     llm_config = lr.language_models.OpenAIGPTConfig(
     chat_model=f"ollama/{llm}", #"ollama/cow/tulu3_tools",
     chat_context_length=16_000, # adjust based on model
     )
 
+    # prompt
+    prompt_text = f"""
+        You are a driving companion.  Using your tools, you have the capability to:
+        {'- find and set radio stations' if radio else ''} 
+        {'- adjust the volume' if volume else ''}
+        {'- adjust the fan speed of the climate control' if hvac else ''}
+        .
+        Keep your responses brief and use casual speech.
+        It's OK to respond with '[Silence]' if you don't have anything substantial to add to the conversation.
+        Do not, under any circumstnances, include an enumerated list in your response.
+        By the way, your name is Neptune.
+    """
+    custom_prompt_path = Path(prompt)
+    if custom_prompt_path.exists():
+        prompt_text = custom_prompt_path.read_text()
+
     # langroid agent
     agent_config = lr.ChatAgentConfig(
         name="Neptune",
         llm=llm_config,
-        system_message=f"""
-            You are a driving companion.  Using your tools, you have the capability to:
-            {'- find and set radio stations' if radio else ''} 
-            {'- adjust the volume' if volume else ''}
-            {'- adjust the fan speed of the climate control' if hvac else ''}
-            .
-            Keep your responses brief and use casual speech.
-            It's OK to respond with '[Silence]' if you don't have anything substantial to add to the conversation.
-            Do not, under any circumstnances, include an enumerated list in your response.
-            By the way, your name is Neptune.
-        """,
+        system_message=prompt_text,
         use_tools=langroid_tools,
         use_functions_api=(not langroid_tools),
     )
