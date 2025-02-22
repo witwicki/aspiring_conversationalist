@@ -122,18 +122,18 @@ class AudioTool(lr.ToolMessage):
         # Each example can either be...
         return [
             # ... just instances of the tool-class, OR
-            cls(volume="10"),
+            cls(volume=10),
             (  # ...a tuple of "thought leading to tool", and the tool instance
                 "I want to crank up the volume",
-                cls(volume="35"),
+                cls(volume=35),
             ),
             (
                 "I want to restore the volume to a normal level",
-                cls(volume="10"),
+                cls(volume=10),
             ),
             (
                 "I want to lower the volume",
-                cls(volume="5")
+                cls(volume=5)
             )
         ]
 
